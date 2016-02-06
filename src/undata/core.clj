@@ -1,7 +1,9 @@
 (ns undata.core
+  (:import [org.apache.poi.ss.usermodel Cell])
   (:require [clojure.java.io :as io]
             [clojure.walk :as walk]
-            [clojure-csv.core :as csv]))
+            [clojure-csv.core :as csv]
+            [dk.ative.docjure.spreadsheet :as spreadsheet]))
 
 (def data-files
   {"idealpoints.tab" "https://dataverse.harvard.edu/api/access/datafile/2699454?format=tab"
@@ -153,3 +155,19 @@
         header (concat ["session" "rcid"] (map name country-header-names))
         full-data (cons header rows)]
     (spit "roll-calls.tab" (csv/write-csv full-data :delimiter \tab))))
+
+(defn cells-in-row [row]
+  (take-while identity
+              (map #(.getCell row %) (range))))
+
+(defn rows-in-sheet [sheet]
+  (take-while identity
+              (map #(.getRow sheet %) (range))))
+
+(defn read-excel-sheet [filename sheetname]
+  (->> (spreadsheet/load-workbook filename)
+       (spreadsheet/select-sheet sheetname)
+       (rows-in-sheet)
+       (map cells-in-row)
+       (map #(map spreadsheet/read-cell %))))
+       
