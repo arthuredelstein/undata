@@ -37,21 +37,20 @@
   (let [in-file (io/reader file)]
     (csv/parse-csv in-file :delimiter \tab)))
 
-(defn read-tabbed-data-with-header
-  "Read tab-delimited data from a file,
+(defn gridded-data-to-maps
+  "Takes a sequence of rows of data,
    returning a sequence of maps, one for each
    row, mapping column name to corresponding
    value in the row."
-  [file]
-  (let [raw-data (read-tabbed-data file)
-        header (first raw-data)
-        data (rest raw-data)]
+  [raw-gridded-data]
+  (let [header (first raw-gridded-data)
+        data (rest raw-gridded-data)]
     (map #(zipmap header %) data)))
 
 (defn country-codes
   "Extract the integer to country-code mapping in the data set."
   []
-  (let [data (read-tabbed-data-with-header "data/idealpoints.tab")]
+  (let [data (gridded-data-to-maps (read-tabbed-data "data/idealpoints.tab"))]
     (into (sorted-map)
           (map #(let [{code "ccode"
                        country-name "CountryName"
@@ -85,7 +84,8 @@
   "Reads raw roll-call data from the file."
   []
   (->>
-   (read-tabbed-data-with-header "data/rawvotingdata13.tab")
+   (read-tabbed-data "data/rawvotingdata13.tab")
+   gridded-data-to-maps
    (map walk/keywordize-keys)
    (map #(fmap parse-code-number %))))
 
@@ -157,12 +157,10 @@
     (spit "roll-calls.tab" (csv/write-csv full-data :delimiter \tab))))
 
 (defn cells-in-row [row]
-  (take-while identity
-              (map #(.getCell row %) (range))))
+  (map #(.getCell roww %) (range (.getLastCellNum row))))
 
 (defn rows-in-sheet [sheet]
-  (take-while identity
-              (map #(.getRow sheet %) (range))))
+  (map #(.getRow sheet %) (range (inc (.getLastRowNum sheet)))))
 
 (defn read-excel-sheet [filename sheetname]
   (->> (spreadsheet/load-workbook filename)
