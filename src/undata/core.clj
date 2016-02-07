@@ -53,7 +53,10 @@
   [sheet]
   (map #(.getRow sheet %) (range (inc (.getLastRowNum sheet)))))
 
-(defn read-excel-sheet [filename sheetname]
+(defn read-excel-sheet
+  "Read in an Excel sheet from a workbook. Convert to a sequence
+   of vectors containing the gridded data."
+  [filename sheetname]
   (->> (spreadsheet/load-workbook filename)
        (spreadsheet/select-sheet sheetname)
        (rows-in-sheet)
@@ -64,12 +67,18 @@
                        (spreadsheet/read-cell cell)))
                    row-cells)))))
 
-(defn read-descriptions []
+(defn read-descriptions
+  "Read the descriptions file and convert to a sequence of
+   row-maps, using the first row (the header) for keywords."
+  []
   (->> (read-excel-sheet "data/descriptions.xls" "descriptions")
        gridded-data-to-maps
        (map walk/keywordize-keys)))
 
-(defn map-descriptions [description-data]
+(defn map-descriptions
+  "Read description data and produce a map of
+   [session rcid] to row-map."
+  [description-data]
   (->> description-data
        (group-by #(vector (int (% :session)) (int (% :rcid))))
        (fmap first)))
