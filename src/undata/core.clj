@@ -27,15 +27,9 @@
 
 (defn download-data-files
   "Download data files specified in map."
-  []  
+  []
   (doseq [[filename url] data-files]
     (download url (str "data/" filename))))
-
-(defn read-tabbed-data
-  "Read tab-delimited data from a file."
-  [file]
-  (let [in-file (io/reader file)]
-    (csv/parse-csv in-file :delimiter \tab)))
 
 (defn gridded-data-to-maps
   "Takes a sequence of rows of data,
@@ -46,6 +40,45 @@
   (let [header (first raw-gridded-data)
         data (rest raw-gridded-data)]
     (map #(zipmap header %) data)))
+
+(defn cells-in-row
+  "Read all cells in a row, from the leftmost column out to
+   and including the last occupied column."
+  [row]
+  (map #(.getCell row %) (range (.getLastCellNum row))))
+
+(defn rows-in-sheet
+  "Read all rows in a sheet, from the topmost row down to
+   and including the last occupied row."
+  [sheet]
+  (map #(.getRow sheet %) (range (inc (.getLastRowNum sheet)))))
+
+(defn read-excel-sheet [filename sheetname]
+  (->> (spreadsheet/load-workbook filename)
+       (spreadsheet/select-sheet sheetname)
+       (rows-in-sheet)
+       (map cells-in-row)
+       (map (fn [row-cells]
+              (map (fn [cell]
+                     (when cell
+                       (spreadsheet/read-cell cell)))
+                   row-cells)))))
+
+(defn read-descriptions []
+  (->> (read-excel-sheet "data/descriptions.xls" "descriptions")
+       gridded-data-to-maps
+       (map walk/keywordize-keys)))
+
+(defn map-descriptions [description-data]
+  (->> description-data
+       (group-by #(vector (int (% :session)) (int (% :rcid))))
+       (fmap first)))
+
+(defn read-tabbed-data
+  "Read tab-delimited data from a file."
+  [file]
+  (let [in-file (io/reader file)]
+    (csv/parse-csv in-file :delimiter \tab)))
 
 (defn country-codes
   "Extract the integer to country-code mapping in the data set."
@@ -132,40 +165,28 @@
    items are session, rcid, and the rest are vote codes, corresponding
    to countries in the provided country-header-names. Something like
    [5 22 1 9 3 4 ...]"
-  [roll-call-data country-header-names]
+  [roll-call-data country-header-names description-maps]
   (let [vote-to-code (clojure.set/map-invert vote-codes)]
     (for [[[session rcid] vote-map] roll-call-data]
-      (map str
-           (concat [session rcid]
-                   (for [heading country-header-names]
-                     (->> heading
-                          (get vote-map)
-                          (get vote-to-code))))))))
+      (let [unres (:unres (description-maps [session rcid]))]
+        (map str
+             (concat [session rcid unres]
+                     (for [heading country-header-names]
+                       (->> heading
+                            (get vote-map)
+                            (get vote-to-code)))))))))
 
 (defn merge-roll-calls
   "Reads roll call data and country-header names and produces
    a file with a header like
-   [\"session\", \"rcid\", \"USA\", \"RUS\" ...]
+   [\"session\", \"rcid\", \"unres\", \"USA\", \"RUS\" ...]
    and rows with integers corresponding to session, rcid, and
    vote codes."
   []
   (let [roll-call-data (roll-call)
         country-header-names (country-headers roll-call-data)
-        rows (roll-call-rows roll-call-data country-header-names)
-        header (concat ["session" "rcid"] (map name country-header-names))
+        description-maps (map-descriptions (read-descriptions))
+        rows (roll-call-rows roll-call-data country-header-names description-maps)
+        header (concat ["session" "rcid" "unres"] (map name country-header-names))
         full-data (cons header rows)]
     (spit "roll-calls.tab" (csv/write-csv full-data :delimiter \tab))))
-
-(defn cells-in-row [row]
-  (map #(.getCell roww %) (range (.getLastCellNum row))))
-
-(defn rows-in-sheet [sheet]
-  (map #(.getRow sheet %) (range (inc (.getLastRowNum sheet)))))
-
-(defn read-excel-sheet [filename sheetname]
-  (->> (spreadsheet/load-workbook filename)
-       (spreadsheet/select-sheet sheetname)
-       (rows-in-sheet)
-       (map cells-in-row)
-       (map #(map spreadsheet/read-cell %))))
-       
