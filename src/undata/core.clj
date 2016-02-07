@@ -1,16 +1,22 @@
-(ns undata.core
-  (:import [org.apache.poi.ss.usermodel Cell])
+(ns ^{:author "Arthur Edelstein"
+      :doc "Retrieve and merge UNGA Resolution data."}
+    undata.core
   (:require [clojure.java.io :as io]
             [clojure.walk :as walk]
             [clojure-csv.core :as csv]
             [dk.ative.docjure.spreadsheet :as spreadsheet]))
 
 (def data-files
+  "Data files from Erik Voeten.
+   See
+   Erik Voeten. \"Data and Analyses of Voting in the UN General Assembly\", Routledge Handbook of International Organization, edited by Bob Reinalda (published May 27, 2013). Available at SSRN: http://ssrn.com/abstract=2111149"
   {"idealpoints.tab" "https://dataverse.harvard.edu/api/access/datafile/2699454?format=tab"
    "rawvotingdata13.tab" "https://dataverse.harvard.edu/api/access/datafile/2699456?format=tab"
    "descriptions.xls" "https://dataverse.harvard.edu/api/access/datafile/2696465"})
 
 (def vote-codes
+  "Map from numerical vote codes to
+   human-readable keywords."
   {1 :yes
    2 :abstain
    3 :no
@@ -171,9 +177,9 @@
 (defn roll-call-rows
   "Generates rows for the roll-call output file. Takes roll-call-data
    and country-header names and produces rows where the first two
-   items are session, rcid, and the rest are vote codes, corresponding
+   items are session, rcid, unres and the rest are vote codes, corresponding
    to countries in the provided country-header-names. Something like
-   [5 22 1 9 3 4 ...]"
+   [5 22 R/44/120 1 9 3 4 ...]"
   [roll-call-data country-header-names description-maps]
   (let [vote-to-code (clojure.set/map-invert vote-codes)]
     (for [[[session rcid] vote-map] roll-call-data]
