@@ -23,6 +23,13 @@
    8 :absent
    9 :non-member})
 
+(defn fmap
+  "Apply a function to each value in a map."
+  ([f m]
+   (into {} (for [[k v] m] [k (f v)])))
+  ([f m key-pred]
+   (into {} (for [[k v] m] [k (if (key-pred k) (f v) v)]))))
+
 (defn download
   "Download the resource at uri and save to a file."
   [uri file]
@@ -79,7 +86,8 @@
   []
   (->> (read-excel-sheet "data/descriptions.xls" "descriptions")
        gridded-data-to-maps
-       (map walk/keywordize-keys)))
+       (map walk/keywordize-keys)
+       (map #(fmap int % #{:session :rcid :yes :no :abstain}))))
 
 (defn map-descriptions
   "Read description data and produce a map of
@@ -104,11 +112,6 @@
                        country-name "CountryName"
                        abbreviation "CountryAbb"} %]
                   [(Integer/parseInt code) [country-name abbreviation]]) data))))
-
-(defn fmap
-  "Apply a function to each value in a map."
-  [f m]
-  (into {} (for [[k v] m] [k (f v)])))
 
 (defn parse-code-number
   "Parse a code number. The codes in the data
@@ -139,8 +142,8 @@
 
 (defn merge-votes
   "Takes a series of roll call data like
-  ({:resolution [5 22], :country USA, :vote :yes}
-   {:resolution [5 22], :country UK, :vote :abstain}...)
+  ({:country USA, :vote :yes}
+   {:country UK, :vote :abstain}...)
   and merges to a single map that looks like
    {:USA :yes, :UK :abstain, ...}."
   [vote-maps]
@@ -163,16 +166,37 @@
          (map #(raw-rc-to-data % ccodes))
          (group-by :resolution)
          (fmap merge-votes)
-         sort)))
+         sort
+         (map #(zipmap [:resolution :votes] %))
+         )))
+
+(defn annotate-roll-call
+  "Add description data to roll-call data."
+  [roll-call-data]
+  (let [description-maps (map-descriptions (read-descriptions))
+        vote-to-code (clojure.set/map-invert vote-codes)]
+    (for [roll-call-entry roll-call-data]
+      (let [description-small (-> roll-call-entry :resolution description-maps
+                                  (select-keys [:unres :yes :no :abstain]))]
+        (merge roll-call-entry description-small)))))
+
+(defn cross-check-votes
+  "Confirms that a roll call entry has consistent data."
+  [roll-call-entry]
+  (let [raw-tally (merge {:yes 0 :no 0 :abstain 0}
+                         (-> roll-call-entry :votes vals frequencies
+                             (select-keys [:yes :no :abstain])))
+        description-tally (-> roll-call-entry (select-keys [:yes :no :abstain]))]
+    ;(println (:resolution roll-call-entry) raw-tally description-tally (merge-with - raw-tally description-tally))
+    (= raw-tally description-tally)))
 
 (defn country-headers
   "Takes the data produced by (roll-call) and
    works out a unified sorted list of country names
    to be used as headers for the output file."
   [roll-call-data]
-  (->> (vals roll-call-data)
-       (map keys) (map set) (apply clojure.set/union)
-       seq sort))
+  (->> roll-call-data (map :votes) (map keys) (map set)
+       (apply clojure.set/union) seq sort))
 
 (defn roll-call-rows
   "Generates rows for the roll-call output file. Takes roll-call-data
@@ -180,15 +204,16 @@
    items are session, rcid, unres and the rest are vote codes, corresponding
    to countries in the provided country-header-names. Something like
    [5 22 R/44/120 1 9 3 4 ...]"
-  [roll-call-data country-header-names description-maps]
+  [roll-call-data country-header-names]
   (let [vote-to-code (clojure.set/map-invert vote-codes)]
-    (for [[[session rcid] vote-map] roll-call-data]
-      (let [unres (:unres (description-maps [session rcid]))]
+    (for [roll-call-entry roll-call-data]
+      (let [{:keys [resolution unres votes]} roll-call-entry
+            [session rcid] resolution]
         (map str
              (concat [session rcid unres]
                      (for [heading country-header-names]
                        (->> heading
-                            (get vote-map)
+                            (get votes)
                             (get vote-to-code)))))))))
 
 (defn merge-roll-calls
@@ -198,10 +223,9 @@
    and rows with integers corresponding to session, rcid, and
    vote codes."
   []
-  (let [roll-call-data (roll-call)
+  (let [roll-call-data (annotate-roll-call (roll-call))
         country-header-names (country-headers roll-call-data)
-        description-maps (map-descriptions (read-descriptions))
-        rows (roll-call-rows roll-call-data country-header-names description-maps)
+        rows (roll-call-rows roll-call-data country-header-names)
         header (concat ["session" "rcid" "unres"] (map name country-header-names))
         full-data (cons header rows)]
     (spit "roll-calls.tab" (csv/write-csv full-data :delimiter \tab))))
